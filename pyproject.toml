@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "Semantic-SAM"
-version = "1.0.2"
+version = "1.0.3"
 description = "Segment and Recognize Anything at Any Granularity."
 readme = "README.md"
 requires-python = ">=3.8"
@@ -46,12 +46,12 @@ dependencies = [
     "deepspeed==0.10.3",
     "wandb==0.15.12",
     "infinibatch==0.1.1",
-    "gradio==3.42.0",     
-    "openai-whisper",    
+    "gradio==3.42.0",
+    "openai-whisper",
 ]
 
 [tool.poetry.dependencies]
-detectron2 = {git = "https://github.com/MaureenZOU/detectron2-xyz.git"}
+detectron2 = { git = "https://github.com/MaureenZOU/detectron2-xyz.git" }
 
 
 [project.urls]

@@ -7,7 +7,6 @@
 # Licensed under The MIT License [see LICENSE for details]
 # Modified by Xueyan Zou (xueyan@cs.wisc.edu)
 # --------------------------------------------------------
-
 """
 Misc functions, including distributed helpers.
 
@@ -20,16 +19,20 @@ import torch.distributed as dist
 import torchvision
 from torch import Tensor
 
-from utils.constants import *
+from .constants import *
+
 
 def get_iou(gt_masks, pred_masks, ignore_label=-1):
     rev_ignore_mask = ~(gt_masks == ignore_label)
     gt_masks = gt_masks.bool()
-    n,h,w = gt_masks.shape
-    intersection = ((gt_masks & pred_masks) & rev_ignore_mask).reshape(n,h*w).sum(dim=-1)
-    union = ((gt_masks | pred_masks) & rev_ignore_mask).reshape(n,h*w).sum(dim=-1)
+    n, h, w = gt_masks.shape
+    intersection = ((gt_masks & pred_masks) & rev_ignore_mask).reshape(
+        n, h * w).sum(dim=-1)
+    union = ((gt_masks | pred_masks) & rev_ignore_mask).reshape(n, h *
+                                                                w).sum(dim=-1)
     ious = (intersection / union)
     return ious
+
 
 def _max_by_axis(the_list):
     # type: (List[List[int]]) -> List[int]
@@ -39,7 +42,9 @@ def _max_by_axis(the_list):
             maxes[index] = max(maxes[index], item)
     return maxes
 
+
 class NestedTensor(object):
+
     def __init__(self, tensors, mask: Optional[Tensor]):
         self.tensors = tensors
         self.mask = mask
@@ -61,6 +66,7 @@ class NestedTensor(object):
     def __repr__(self):
         return str(self.tensors)
 
+
 def nested_tensor_from_tensor_list(tensor_list: List[Tensor]):
     # TODO make this more general
     if tensor_list[0].ndim == 3:
@@ -79,8 +85,8 @@ def nested_tensor_from_tensor_list(tensor_list: List[Tensor]):
         tensor = torch.zeros(batch_shape, dtype=dtype, device=device)
         mask = torch.ones((b, h, w), dtype=torch.bool, device=device)
         for img, pad_img, m in zip(tensor_list, tensor, mask):
-            pad_img[: img.shape[0], : img.shape[1], : img.shape[2]].copy_(img)
-            m[: img.shape[1], : img.shape[2]] = False
+            pad_img[:img.shape[0], :img.shape[1], :img.shape[2]].copy_(img)
+            m[:img.shape[1], :img.shape[2]] = False
     elif tensor_list[0].ndim == 2:
         if torchvision._is_tracing():
             # nested_tensor_from_tensor_list() does not export well to ONNX
@@ -97,26 +103,27 @@ def nested_tensor_from_tensor_list(tensor_list: List[Tensor]):
         tensor = torch.zeros(batch_shape, dtype=dtype, device=device)
         mask = torch.ones((b, l), dtype=torch.bool, device=device)
         for txt, pad_txt, m in zip(tensor_list, tensor, mask):
-            pad_txt[: txt.shape[0], : txt.shape[1]] = txt
-            m[: txt.shape[1]] = False
+            pad_txt[:txt.shape[0], :txt.shape[1]] = txt
+            m[:txt.shape[1]] = False
     else:
         raise ValueError("not supported")
     return NestedTensor(tensor, mask)
+
 
 def _collate_and_pad_divisibility(tensor_list: list, div=32):
     max_size = []
     for i in range(tensor_list[0].dim()):
         max_size_i = torch.max(
-            torch.tensor([img.shape[i] for img in tensor_list]).to(torch.float32)
-        ).to(torch.int64)
+            torch.tensor([img.shape[i] for img in tensor_list
+                          ]).to(torch.float32)).to(torch.int64)
         max_size.append(max_size_i)
     max_size = tuple(max_size)
 
-    c,h,w = max_size
+    c, h, w = max_size
     pad_h = (div - h % div) if h % div != 0 else 0
     pad_w = (div - w % div) if w % div != 0 else 0
-    max_size = (c,h+pad_h,w+pad_w)
-    
+    max_size = (c, h + pad_h, w + pad_w)
+
     # work around for
     # pad_img[: img.shape[0], : img.shape[1], : img.shape[2]].copy_(img)
     # m[: img.shape[1], :img.shape[2]] = False
@@ -125,24 +132,29 @@ def _collate_and_pad_divisibility(tensor_list: list, div=32):
     padded_masks = []
     for img in tensor_list:
         padding = [(s1 - s2) for s1, s2 in zip(max_size, tuple(img.shape))]
-        padded_img = torch.nn.functional.pad(img, (0, padding[2], 0, padding[1], 0, padding[0]))
+        padded_img = torch.nn.functional.pad(
+            img, (0, padding[2], 0, padding[1], 0, padding[0]))
         padded_imgs.append(padded_img)
 
         m = torch.zeros_like(img[0], dtype=torch.int, device=img.device)
-        padded_mask = torch.nn.functional.pad(m, (0, padding[2], 0, padding[1]), "constant", 1)
+        padded_mask = torch.nn.functional.pad(m,
+                                              (0, padding[2], 0, padding[1]),
+                                              "constant", 1)
         padded_masks.append(padded_mask.to(torch.bool))
-    
+
     return padded_imgs
+
 
 # _onnx_nested_tensor_from_tensor_list() is an implementation of
 # nested_tensor_from_tensor_list() that is supported by ONNX tracing.
 @torch.jit.unused
-def _onnx_nested_tensor_from_tensor_list(tensor_list: List[Tensor]) -> NestedTensor:
+def _onnx_nested_tensor_from_tensor_list(
+        tensor_list: List[Tensor]) -> NestedTensor:
     max_size = []
     for i in range(tensor_list[0].dim()):
         max_size_i = torch.max(
-            torch.stack([img.shape[i] for img in tensor_list]).to(torch.float32)
-        ).to(torch.int64)
+            torch.stack([img.shape[i] for img in tensor_list
+                         ]).to(torch.float32)).to(torch.int64)
         max_size.append(max_size_i)
     max_size = tuple(max_size)
 
@@ -154,17 +166,21 @@ def _onnx_nested_tensor_from_tensor_list(tensor_list: List[Tensor]) -> NestedTen
     padded_masks = []
     for img in tensor_list:
         padding = [(s1 - s2) for s1, s2 in zip(max_size, tuple(img.shape))]
-        padded_img = torch.nn.functional.pad(img, (0, padding[2], 0, padding[1], 0, padding[0]))
+        padded_img = torch.nn.functional.pad(
+            img, (0, padding[2], 0, padding[1], 0, padding[0]))
         padded_imgs.append(padded_img)
 
         m = torch.zeros_like(img[0], dtype=torch.int, device=img.device)
-        padded_mask = torch.nn.functional.pad(m, (0, padding[2], 0, padding[1]), "constant", 1)
+        padded_mask = torch.nn.functional.pad(m,
+                                              (0, padding[2], 0, padding[1]),
+                                              "constant", 1)
         padded_masks.append(padded_mask.to(torch.bool))
 
     tensor = torch.stack(padded_imgs)
     mask = torch.stack(padded_masks)
 
     return NestedTensor(tensor, mask=mask)
+
 
 def is_dist_avail_and_initialized():
     if not dist.is_available():
@@ -222,12 +238,15 @@ def get_class_names(name, background=True):
     elif 'lvis' in name:
         class_names = LVIS_CATEGORIES
     elif 'seginw' in name:
-        class_names = SEGINW_CATEGORIES[name.replace('_train', '').replace('_val', '')] + ["background"]
+        class_names = SEGINW_CATEGORIES[name.replace('_train', '').replace(
+            '_val', '')] + ["background"]
     elif name == 'cityscapes_fine_sem_seg_val':
         class_names = CITYSCAPES
     elif name == 'cityscapes_fine_instance_seg_val':
         class_names = CITYSCAPES_THING + ["background"]
-    elif name in ['cityscapes_fine_panoptic_val', 'cityscapes_fine_panoptic_train']:
+    elif name in [
+            'cityscapes_fine_panoptic_val', 'cityscapes_fine_panoptic_train'
+    ]:
         class_names = CITYSCAPES + ["background"]
     elif name == 'bdd10k_val_sem_seg':
         class_names = BDD_SEM
@@ -241,7 +260,8 @@ def get_class_names(name, background=True):
 
     return class_names
 
-# TODO: add background to 
+
+# TODO: add background to
 # def get_class_names(name):
 #     if name is None:
 #         return None
