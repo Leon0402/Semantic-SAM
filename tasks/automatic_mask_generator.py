@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple
 # from
 # from .modeling import Sam
 # from .predictor import SamPredictor
-from utils.sam_utils.amg import (
+from semantic_sam.utils.sam_utils.amg import (
     MaskData,
     area_from_rle,
     batch_iterator,
@@ -51,6 +51,7 @@ def prompt_switch(p):
 
 
 class SemanticSamAutomaticMaskGenerator:
+
     def __init__(
         self,
         model,
@@ -126,7 +127,8 @@ class SemanticSamAutomaticMaskGenerator:
         elif point_grids is not None:
             self.point_grids = point_grids
         else:
-            raise ValueError("Can't have both points_per_side and point_grid be None.")
+            raise ValueError(
+                "Can't have both points_per_side and point_grid be None.")
 
         assert output_mode in [
             "binary_mask",
@@ -190,9 +192,13 @@ class SemanticSamAutomaticMaskGenerator:
             )
         # Encode masks
         if self.output_mode == "coco_rle":
-            mask_data["segmentations"] = [coco_encode_rle(rle) for rle in mask_data["rles"]]
+            mask_data["segmentations"] = [
+                coco_encode_rle(rle) for rle in mask_data["rles"]
+            ]
         elif self.output_mode == "binary_mask":
-            mask_data["segmentations"] = [rle_to_mask(rle) for rle in mask_data["rles"]]
+            mask_data["segmentations"] = [
+                rle_to_mask(rle) for rle in mask_data["rles"]
+            ]
         else:
             mask_data["segmentations"] = mask_data["rles"]
 
@@ -200,13 +206,19 @@ class SemanticSamAutomaticMaskGenerator:
         curr_anns = []
         for idx in range(len(mask_data["segmentations"])):
             ann = {
-                "segmentation": mask_data["segmentations"][idx],
-                "area": area_from_rle(mask_data["rles"][idx]),
-                "bbox": box_xyxy_to_xywh(mask_data["boxes"][idx]).tolist(),
-                "predicted_iou": mask_data["iou_preds"][idx].item(),
+                "segmentation":
+                mask_data["segmentations"][idx],
+                "area":
+                area_from_rle(mask_data["rles"][idx]),
+                "bbox":
+                box_xyxy_to_xywh(mask_data["boxes"][idx]).tolist(),
+                "predicted_iou":
+                mask_data["iou_preds"][idx].item(),
                 "point_coords": [mask_data["points"][idx].tolist()],
-                "stability_score": mask_data["stability_score"][idx].item(),
-                "crop_box": box_xyxy_to_xywh(mask_data["crop_boxes"][idx]).tolist(),
+                "stability_score":
+                mask_data["stability_score"][idx].item(),
+                "crop_box":
+                box_xyxy_to_xywh(mask_data["crop_boxes"][idx]).tolist(),
             }
             curr_anns.append(ann)
 
@@ -214,15 +226,16 @@ class SemanticSamAutomaticMaskGenerator:
 
     def _generate_masks(self, image: np.ndarray) -> MaskData:
         orig_size = image.shape[-2:]
-        crop_boxes, layer_idxs = generate_crop_boxes(
-            orig_size, self.crop_n_layers, self.crop_overlap_ratio
-        )
+        crop_boxes, layer_idxs = generate_crop_boxes(orig_size,
+                                                     self.crop_n_layers,
+                                                     self.crop_overlap_ratio)
 
         # Iterate over image crops
-        assert len(crop_boxes)==1
+        assert len(crop_boxes) == 1
         data = MaskData()
         for crop_box, layer_idx in zip(crop_boxes, layer_idxs):
-            crop_data = self._process_crop(image, crop_box, layer_idx, orig_size)
+            crop_data = self._process_crop(image, crop_box, layer_idx,
+                                           orig_size)
 
             data.cat(crop_data)
 
@@ -251,19 +264,22 @@ class SemanticSamAutomaticMaskGenerator:
     ) -> MaskData:
         # Crop the image and calculate embeddings
         x0, y0, x1, y1 = crop_box
-        cropped_im = image#[y0:y1, x0:x1, :]
+        cropped_im = image  #[y0:y1, x0:x1, :]
         cropped_im_size = cropped_im.shape[-2:]
         # self.predictor.set_image(cropped_im)
 
         # Get points for this crop
         points_scale = np.array(cropped_im_size)[None, ::-1]
-        points_for_image = self.point_grids[crop_layer_idx] #* points_scale
+        points_for_image = self.point_grids[crop_layer_idx]  #* points_scale
 
         # Generate masks for this crop in batches
         data = MaskData()
-        self.enc_features=None
-        for (points,) in batch_iterator(self.points_per_batch, points_for_image):
-            batch_data = self._process_batch(cropped_im,points, cropped_im_size, crop_box, orig_size)
+        self.enc_features = None
+        for (points, ) in batch_iterator(self.points_per_batch,
+                                         points_for_image):
+            batch_data = self._process_batch(cropped_im, points,
+                                             cropped_im_size, crop_box,
+                                             orig_size)
             data.cat(batch_data)
             del batch_data
 
@@ -277,7 +293,8 @@ class SemanticSamAutomaticMaskGenerator:
 
         # Return to the original image frame
         data["boxes"] = uncrop_boxes_xyxy(data["boxes"], crop_box)
-        data["crop_boxes"] = torch.tensor([crop_box for _ in range(len(data["rles"]))])
+        data["crop_boxes"] = torch.tensor(
+            [crop_box for _ in range(len(data["rles"]))])
 
         return data
 
@@ -292,22 +309,39 @@ class SemanticSamAutomaticMaskGenerator:
         orig_h, orig_w = orig_size
 
         data = {"image": images, "height": orig_h, "width": orig_w}
-        points=torch.tensor(points,dtype=torch.float).to(images.device)
-        points = torch.cat([points, points.new_tensor([[0.005, 0.005]]).repeat(len(points), 1)], dim=-1)
+        points = torch.tensor(points, dtype=torch.float).to(images.device)
+        points = torch.cat([
+            points,
+            points.new_tensor([[0.005, 0.005]]).repeat(len(points), 1)
+        ],
+                           dim=-1)
         data['targets'] = [dict()]
-        data['targets'][0]['points']=points
-        data['targets'][0]['pb']=points.new_tensor([0.]*len(points))
+        data['targets'][0]['points'] = points
+        data['targets'][0]['pb'] = points.new_tensor([0.] * len(points))
         batch_inputs = [data]
         if self.enc_features is None:
-            masks, iou_preds,mask_features,multi_scale_features= self.predictor.model.evaluate_demo(batch_inputs,None,None,return_features=True, level=self.level)
-            self.enc_features=(mask_features,multi_scale_features)
+            masks, iou_preds, mask_features, multi_scale_features = self.predictor.model.evaluate_demo(
+                batch_inputs,
+                None,
+                None,
+                return_features=True,
+                level=self.level)
+            self.enc_features = (mask_features, multi_scale_features)
         else:
-            masks, iou_preds= self.predictor.model.evaluate_demo(batch_inputs,None,None,self.enc_features[0],self.enc_features[1], level=self.level)
+            masks, iou_preds = self.predictor.model.evaluate_demo(
+                batch_inputs,
+                None,
+                None,
+                self.enc_features[0],
+                self.enc_features[1],
+                level=self.level)
         # import ipdb; ipdb.set_trace()
         data = MaskData(
             masks=masks,
             iou_preds=iou_preds.flatten(),
-            points=torch.as_tensor(points[:,None].repeat(1,len(self.level), 1).view(-1,4)),
+            points=torch.as_tensor(points[:,
+                                          None].repeat(1, len(self.level),
+                                                       1).view(-1, 4)),
         )
         del masks
         # Filter by predicted IoU
@@ -316,8 +350,7 @@ class SemanticSamAutomaticMaskGenerator:
 
         # Calculate stability score
         data["stability_score"] = calculate_stability_score(
-            data["masks"], 0.0, self.stability_score_offset
-        )
+            data["masks"], 0.0, self.stability_score_offset)
         # if self.stability_score_thresh > 0.0:
         keep_mask = data["stability_score"] >= self.stability_score_thresh
         data.filter(keep_mask)
@@ -327,7 +360,8 @@ class SemanticSamAutomaticMaskGenerator:
         data["boxes"] = batched_mask_to_box(data["masks"])
 
         # Filter boxes that touch crop boundaries
-        keep_mask = ~is_box_near_crop_edge(data["boxes"], crop_box, [0, 0, orig_w, orig_h])
+        keep_mask = ~is_box_near_crop_edge(data["boxes"], crop_box,
+                                           [0, 0, orig_w, orig_h])
         if not torch.all(keep_mask):
             data.filter(keep_mask)
 
@@ -339,9 +373,8 @@ class SemanticSamAutomaticMaskGenerator:
         return data
 
     @staticmethod
-    def postprocess_small_regions(
-        mask_data: MaskData, min_area: int, nms_thresh: float
-    ) -> MaskData:
+    def postprocess_small_regions(mask_data: MaskData, min_area: int,
+                                  nms_thresh: float) -> MaskData:
         """
         Removes small disconnected regions and holes in masks, then reruns
         box NMS to remove any new duplicates.
@@ -361,7 +394,9 @@ class SemanticSamAutomaticMaskGenerator:
 
             mask, changed = remove_small_regions(mask, min_area, mode="holes")
             unchanged = not changed
-            mask, changed = remove_small_regions(mask, min_area, mode="islands")
+            mask, changed = remove_small_regions(mask,
+                                                 min_area,
+                                                 mode="islands")
             unchanged = unchanged and not changed
 
             new_masks.append(torch.as_tensor(mask).unsqueeze(0))
@@ -384,7 +419,8 @@ class SemanticSamAutomaticMaskGenerator:
             if scores[i_mask] == 0.0:
                 mask_torch = masks[i_mask].unsqueeze(0)
                 mask_data["rles"][i_mask] = mask_to_rle_pytorch(mask_torch)[0]
-                mask_data["boxes"][i_mask] = boxes[i_mask]  # update res directly
+                mask_data["boxes"][i_mask] = boxes[
+                    i_mask]  # update res directly
         mask_data.filter(keep_by_nms)
 
         return mask_data

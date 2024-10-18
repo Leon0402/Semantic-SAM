@@ -1,15 +1,22 @@
 import torch
 import numpy as np
 from torchvision import transforms
-from utils.visualizer import Visualizer
+from semantic_sam.utils.visualizer import Visualizer
 from typing import Tuple
 from PIL import Image
 from detectron2.data import MetadataCatalog
+
 metadata = MetadataCatalog.get('coco_2017_train_panoptic')
 
 
 class SemanticSAMPredictor:
-    def __init__(self, model, thresh=0.5, text_size=640, hole_scale=100, island_scale=100):
+
+    def __init__(self,
+                 model,
+                 thresh=0.5,
+                 text_size=640,
+                 hole_scale=100,
+                 island_scale=100):
         """
         thresh: iou thresh to filter low confidence objects
         text_size: resize the input image short edge for the model to process
@@ -41,9 +48,11 @@ class SemanticSAMPredictor:
             point[0, 0] = point_[0, 0]
             point[0, 1] = point_[0, 1]
             # point = point[:, [1, 0]]
-            point = torch.cat([point, point.new_tensor([[0.005, 0.005]])], dim=-1)
+            point = torch.cat(
+                [point, point.new_tensor([[0.005, 0.005]])], dim=-1)
 
-        self.point = point[:, :2].clone()*(torch.tensor([width, height]).to(point))
+        self.point = point[:, :2].clone() * (torch.tensor([width, height
+                                                           ]).to(point))
 
         data['targets'] = [dict()]
         data['targets'][0]['points'] = point
@@ -64,7 +73,8 @@ class SemanticSAMPredictor:
         mask_ls = []
         ious_res = []
         areas = []
-        for i, (pred_masks_pos, iou) in enumerate(zip(pred_masks_poses[ids], ious[ids])):
+        for i, (pred_masks_pos,
+                iou) in enumerate(zip(pred_masks_poses[ids], ious[ids])):
             iou = round(float(iou), 2)
             texts = f'{iou}'
             mask = (pred_masks_pos > 0.0).cpu().numpy()
@@ -73,7 +83,8 @@ class SemanticSAMPredictor:
             if iou < self.thresh:
                 conti = True
             for m in mask_ls:
-                if np.logical_and(mask, m).sum() / np.logical_or(mask, m).sum() > 0.95:
+                if np.logical_and(mask, m).sum() / np.logical_or(
+                        mask, m).sum() > 0.95:
                     conti = True
                     break
             if i == len(pred_masks_poses[ids]) - 1 and mask_ls == []:
@@ -83,8 +94,12 @@ class SemanticSAMPredictor:
             ious_res.append(iou)
             mask_ls.append(mask)
             areas.append(area)
-            mask, _ = self.remove_small_regions(mask, int(self.hole_scale), mode="holes")
-            mask, _ = self.remove_small_regions(mask, int(self.island_scale), mode="islands")
+            mask, _ = self.remove_small_regions(mask,
+                                                int(self.hole_scale),
+                                                mode="holes")
+            mask, _ = self.remove_small_regions(mask,
+                                                int(self.island_scale),
+                                                mode="islands")
             mask = (mask).astype(np.float)
             out_txt = texts
             visual = Visualizer(image_ori, metadata=metadata)
@@ -112,9 +127,8 @@ class SemanticSAMPredictor:
         return self.process_multi_mask(masks, ious, image_ori)
 
     @staticmethod
-    def remove_small_regions(
-            mask: np.ndarray, area_thresh: float, mode: str
-    ) -> Tuple[np.ndarray, bool]:
+    def remove_small_regions(mask: np.ndarray, area_thresh: float,
+                             mode: str) -> Tuple[np.ndarray, bool]:
         """
         Removes small disconnected regions and holes in a mask. Returns the
         mask and an indicator of if the mask has been modified.
@@ -124,7 +138,8 @@ class SemanticSAMPredictor:
         assert mode in ["holes", "islands"]
         correct_holes = mode == "holes"
         working_mask = (correct_holes ^ mask).astype(np.uint8)
-        n_labels, regions, stats, _ = cv2.connectedComponentsWithStats(working_mask, 8)
+        n_labels, regions, stats, _ = cv2.connectedComponentsWithStats(
+            working_mask, 8)
         sizes = stats[:, -1][1:]  # Row 0 is background label
         small_regions = [i + 1 for i, s in enumerate(sizes) if s < area_thresh]
         if len(small_regions) == 0:

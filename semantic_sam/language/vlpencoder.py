@@ -13,7 +13,7 @@ from timm.models.layers import trunc_normal_
 from .registry import register_model
 from ..utils import configurable
 from .LangEncoder import build_tokenizer, build_lang_encoder
-from utils.prompt_engineering import prompt_engineering, get_prompt_templates
+from semantic_sam.utils.prompt_engineering import prompt_engineering, get_prompt_templates
 
 
 class LanguageEncoder(nn.Module):
@@ -36,26 +36,26 @@ class LanguageEncoder(nn.Module):
         self.lang_proj = lang_projection
         self.max_token_num = max_token_num
         self.logit_scale = nn.Parameter(torch.ones([]))
-        
+
         # captioning & retrieval
         for key, value in queue_operator.items():
             self.register_buffer(key, value)
-            
 
     @classmethod
     def from_config(cls, cfg):
         # build up text encoder for seg
         tokenizer = build_tokenizer(cfg['MODEL']['TEXT'])
         tokenizer_type = cfg['MODEL']['TEXT']['TOKENIZER']
-        lang_encoder = build_lang_encoder(cfg['MODEL']['TEXT'], tokenizer, cfg['VERBOSE'])
+        lang_encoder = build_lang_encoder(cfg['MODEL']['TEXT'], tokenizer,
+                                          cfg['VERBOSE'])
         max_token_num = cfg['MODEL']['TEXT']['CONTEXT_LENGTH']
-        
+
         dim_lang = cfg['MODEL']['TEXT']['WIDTH']
         dim_projection = cfg['MODEL']['DIM_PROJ']
         lang_projection = nn.Parameter(torch.empty(dim_lang, dim_projection))
         trunc_normal_(lang_projection, std=.02)
 
-        # tested not working better      
+        # tested not working better
         queue_operator = {}
 
         return {
@@ -67,7 +67,13 @@ class LanguageEncoder(nn.Module):
             "queue_operator": queue_operator,
         }
 
-    def get_text_embeddings(self, class_names, name='default', is_eval=False, add_bgd=False, prompt=True, norm=True):
+    def get_text_embeddings(self,
+                            class_names,
+                            name='default',
+                            is_eval=False,
+                            add_bgd=False,
+                            prompt=True,
+                            norm=True):
         if not is_eval:
             if prompt:
                 # randomly sample one template
@@ -79,13 +85,15 @@ class LanguageEncoder(nn.Module):
                     arbitary_concepts.append("A background in coco.")
             else:
                 arbitary_concepts = class_names
-            
+
             input_ids = []
             attention_masks = []
             for txt in arbitary_concepts:
-                tokens = self.tokenizer(
-                    txt, padding='max_length', truncation=True, max_length=self.max_token_num, return_tensors='pt'
-                )
+                tokens = self.tokenizer(txt,
+                                        padding='max_length',
+                                        truncation=True,
+                                        max_length=self.max_token_num,
+                                        return_tensors='pt')
                 tokens['input_ids'].squeeze_()
                 tokens['attention_mask'].squeeze_()
 
@@ -95,15 +103,23 @@ class LanguageEncoder(nn.Module):
             arbitary_tokens = torch.stack(input_ids)
             arbitary_attention_masks = torch.stack(attention_masks)
 
-            text_emb = self.forward_language((arbitary_tokens.cuda(), arbitary_attention_masks.cuda()), norm=norm)
+            text_emb = self.forward_language(
+                (arbitary_tokens.cuda(), arbitary_attention_masks.cuda()),
+                norm=norm)
             setattr(self, '{}_text_embeddings'.format(name), text_emb)
         else:
             with torch.no_grad():
+
                 def extract_mean_emb(txts):
-                    tokens = self.tokenizer(
-                        txts, padding='max_length', truncation=True, max_length=self.max_token_num, return_tensors='pt'
-                    )
-                    clss_embedding = self.forward_language((tokens['input_ids'].cuda(), tokens['attention_mask'].cuda()), norm=norm)
+                    tokens = self.tokenizer(txts,
+                                            padding='max_length',
+                                            truncation=True,
+                                            max_length=self.max_token_num,
+                                            return_tensors='pt')
+                    clss_embedding = self.forward_language(
+                        (tokens['input_ids'].cuda(),
+                         tokens['attention_mask'].cuda()),
+                        norm=norm)
                     clss_embedding = clss_embedding.mean(dim=0)
                     clss_embedding /= clss_embedding.norm()
                     return clss_embedding
@@ -112,7 +128,12 @@ class LanguageEncoder(nn.Module):
                 clss_embeddings = []
                 if prompt:
                     for clss in class_names:
-                        txts = [template.format(clss.replace('-other','').replace('-merged','').replace('-stuff','')) for template in templates]
+                        txts = [
+                            template.format(
+                                clss.replace('-other', '').replace(
+                                    '-merged', '').replace('-stuff', ''))
+                            for template in templates
+                        ]
                         clss_embeddings.append(extract_mean_emb(txts))
                 else:
                     clss_embeddings.append(extract_mean_emb(class_names))
@@ -124,18 +145,27 @@ class LanguageEncoder(nn.Module):
                 text_emb = torch.stack(clss_embeddings, dim=0)
                 setattr(self, '{}_text_embeddings'.format(name), text_emb)
 
-    def get_text_token_embeddings(self, txts, name='default', token=False, norm=False):
+    def get_text_token_embeddings(self,
+                                  txts,
+                                  name='default',
+                                  token=False,
+                                  norm=False):
         if not token:
-            tokens = self.tokenizer(
-                txts, padding='max_length', truncation=True, max_length=self.max_token_num, return_tensors='pt'
-            )
+            tokens = self.tokenizer(txts,
+                                    padding='max_length',
+                                    truncation=True,
+                                    max_length=self.max_token_num,
+                                    return_tensors='pt')
             tokens = {key: value.cuda() for key, value in tokens.items()}
         else:
             tokens = txts
-        token_emb, class_emb = self.forward_language_token((tokens['input_ids'], tokens['attention_mask']), norm=norm)
-        ret = {"tokens": tokens,
-                "token_emb": token_emb,
-                "class_emb": class_emb,}
+        token_emb, class_emb = self.forward_language_token(
+            (tokens['input_ids'], tokens['attention_mask']), norm=norm)
+        ret = {
+            "tokens": tokens,
+            "token_emb": token_emb,
+            "class_emb": class_emb,
+        }
         setattr(self, '{}_token_embeddings'.format(name), ret)
         return ret
 
@@ -152,13 +182,14 @@ class LanguageEncoder(nn.Module):
         if norm:
             x = x / (x.norm(dim=-1, keepdim=True) + 1e-7)
         return x
-    
+
     def forward_language_token(self, texts, norm=False):
         x = self.lang_encoder(*texts)
         token_x = x['last_hidden_state']
 
         if self.tokenizer_type == 'clip':
-            class_x = token_x[torch.arange(token_x.size(0)), texts[0].argmax(dim=-1)]
+            class_x = token_x[torch.arange(token_x.size(0)),
+                              texts[0].argmax(dim=-1)]
         else:
             class_x = token_x[:, 0]
 
@@ -170,13 +201,14 @@ class LanguageEncoder(nn.Module):
             token_x = token_x / (token_x.norm(dim=-1, keepdim=True) + 1e-7)
 
         return token_x, class_x
-    
+
     def compute_similarity(self, v_emb, name='default', fake=False):
         if fake:
             return None
         v_emb = v_emb / (v_emb.norm(dim=-1, keepdim=True) + 1e-7)
         t_emb = getattr(self, '{}_text_embeddings'.format(name))
-        output = self.logit_scale.exp() * v_emb @ t_emb.unsqueeze(0).transpose(1, 2)
+        output = self.logit_scale.exp() * v_emb @ t_emb.unsqueeze(0).transpose(
+            1, 2)
         return output
 
 

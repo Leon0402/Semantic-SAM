@@ -7,7 +7,7 @@ from timm.models.layers import trunc_normal_
 from .registry import register_model
 from ..utils import configurable
 from .LangEncoder import build_tokenizer, build_lang_encoder
-from utils.prompt_engineering import prompt_engineering, get_prompt_templates
+from semantic_sam.utils.prompt_engineering import prompt_engineering, get_prompt_templates
 
 
 class LanguageEncoder(nn.Module):
@@ -34,9 +34,10 @@ class LanguageEncoder(nn.Module):
         # build up text encoder
         tokenizer = build_tokenizer(cfg['MODEL']['TEXT'])
         tokenizer_type = cfg['MODEL']['TEXT']['TOKENIZER']
-        lang_encoder = build_lang_encoder(cfg['MODEL']['TEXT'], tokenizer, cfg['VERBOSE'])
+        lang_encoder = build_lang_encoder(cfg['MODEL']['TEXT'], tokenizer,
+                                          cfg['VERBOSE'])
         max_token_num = cfg['MODEL']['TEXT']['CONTEXT_LENGTH']
-        
+
         dim_lang = cfg['MODEL']['TEXT']['WIDTH']
         dim_projection = cfg['MODEL']['DIM_PROJ']
         lang_projection = nn.Parameter(torch.empty(dim_lang, dim_projection))
@@ -51,7 +52,13 @@ class LanguageEncoder(nn.Module):
         }
 
     # @torch.no_grad()
-    def get_text_embeddings(self, class_names, name='default', is_eval=False, add_bgd=False, prompt=True, norm=True):
+    def get_text_embeddings(self,
+                            class_names,
+                            name='default',
+                            is_eval=False,
+                            add_bgd=False,
+                            prompt=True,
+                            norm=True):
         if not is_eval:
             if prompt:
                 # randomly sample one template
@@ -63,13 +70,15 @@ class LanguageEncoder(nn.Module):
                     arbitary_concepts.append("A background in coco.")
             else:
                 arbitary_concepts = class_names
-            
+
             input_ids = []
             attention_masks = []
             for txt in arbitary_concepts:
-                tokens = self.tokenizer(
-                    txt, padding='max_length', truncation=True, max_length=self.max_token_num, return_tensors='pt'
-                )
+                tokens = self.tokenizer(txt,
+                                        padding='max_length',
+                                        truncation=True,
+                                        max_length=self.max_token_num,
+                                        return_tensors='pt')
                 tokens['input_ids'].squeeze_()
                 tokens['attention_mask'].squeeze_()
 
@@ -79,15 +88,23 @@ class LanguageEncoder(nn.Module):
             arbitary_tokens = torch.stack(input_ids)
             arbitary_attention_masks = torch.stack(attention_masks)
 
-            text_emb = self.forward_language((arbitary_tokens.cuda(), arbitary_attention_masks.cuda()), norm=norm)
+            text_emb = self.forward_language(
+                (arbitary_tokens.cuda(), arbitary_attention_masks.cuda()),
+                norm=norm)
             setattr(self, '{}_text_embeddings'.format(name), text_emb)
         else:
             with torch.no_grad():
+
                 def extract_mean_emb(txts):
-                    tokens = self.tokenizer(
-                        txts, padding='max_length', truncation=True, max_length=self.max_token_num, return_tensors='pt'
-                    )
-                    clss_embedding = self.forward_language((tokens['input_ids'].cuda(), tokens['attention_mask'].cuda()), norm=norm)
+                    tokens = self.tokenizer(txts,
+                                            padding='max_length',
+                                            truncation=True,
+                                            max_length=self.max_token_num,
+                                            return_tensors='pt')
+                    clss_embedding = self.forward_language(
+                        (tokens['input_ids'].cuda(),
+                         tokens['attention_mask'].cuda()),
+                        norm=norm)
                     clss_embedding = clss_embedding.mean(dim=0)
                     clss_embedding /= clss_embedding.norm()
                     return clss_embedding
@@ -95,7 +112,13 @@ class LanguageEncoder(nn.Module):
                 templates = get_prompt_templates()
                 clss_embeddings = []
                 for clss in class_names:
-                    txts = [template.format(clss.replace('-other','').replace('-merged','').replace('-stuff','')) for template in templates]
+                    txts = [
+                        template.format(
+                            clss.replace('-other',
+                                         '').replace('-merged',
+                                                     '').replace('-stuff', ''))
+                        for template in templates
+                    ]
                     clss_embeddings.append(extract_mean_emb(txts))
 
                 if add_bgd:
@@ -119,11 +142,12 @@ class LanguageEncoder(nn.Module):
         if norm:
             x = x / (x.norm(dim=-1, keepdim=True) + 1e-7)
         return x
-    
+
     def compute_similarity(self, v_emb, name='default'):
         v_emb = v_emb / (v_emb.norm(dim=-1, keepdim=True) + 1e-7)
         t_emb = getattr(self, '{}_text_embeddings'.format(name))
-        output = self.logit_scale.exp() * v_emb @ t_emb.unsqueeze(0).transpose(1, 2)
+        output = self.logit_scale.exp() * v_emb @ t_emb.unsqueeze(0).transpose(
+            1, 2)
         return output
 
 

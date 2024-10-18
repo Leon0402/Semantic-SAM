@@ -36,33 +36,28 @@ from datasets import (
     build_eval_dataloader,
 )
 import random
-from detectron2.engine import (
-    DefaultTrainer,
-    default_argument_parser,
-    default_setup,
-    hooks,
-    launch,
-    create_ddp_model,
-    AMPTrainer,
-    SimpleTrainer
-)
+from detectron2.engine import (DefaultTrainer, default_argument_parser,
+                               default_setup, hooks, launch, create_ddp_model,
+                               AMPTrainer, SimpleTrainer)
 import weakref
 
 from semantic_sam import build_model
 from semantic_sam.BaseModel import BaseModel
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level = logging.INFO)
+logging.basicConfig(level=logging.INFO)
 
 
 class Trainer(DefaultTrainer):
     """
     Extension of the Trainer class adapted to MaskFormer.
     """
+
     def __init__(self, cfg):
         super(DefaultTrainer, self).__init__()
         logger = logging.getLogger("detectron2")
-        if not logger.isEnabledFor(logging.INFO):  # setup_logger is not called for d2
+        if not logger.isEnabledFor(
+                logging.INFO):  # setup_logger is not called for d2
             setup_logger()
         cfg = DefaultTrainer.auto_scale_workers(cfg, comm.get_world_size())
 
@@ -72,9 +67,8 @@ class Trainer(DefaultTrainer):
         data_loader = self.build_train_loader(cfg)
 
         model = create_ddp_model(model, broadcast_buffers=False)
-        self._trainer = (AMPTrainer if cfg.SOLVER.AMP.ENABLED else SimpleTrainer)(
-            model, data_loader, optimizer
-        )
+        self._trainer = (AMPTrainer if cfg.SOLVER.AMP.ENABLED else
+                         SimpleTrainer)(model, data_loader, optimizer)
         self.scheduler = self.build_lr_scheduler(cfg, optimizer)
 
         # add model EMA
@@ -123,7 +117,9 @@ class Trainer(DefaultTrainer):
         # This is not always the best: if checkpointing has a different frequency,
         # some checkpoints may have more precise statistics than others.
         if comm.is_main_process():
-            ret.append(hooks.PeriodicCheckpointer(self.checkpointer, cfg.SOLVER.CHECKPOINT_PERIOD))
+            ret.append(
+                hooks.PeriodicCheckpointer(self.checkpointer,
+                                           cfg.SOLVER.CHECKPOINT_PERIOD))
 
         def test_and_save_results():
             self._last_eval_results = self.test(self.cfg, self.model)
@@ -205,7 +201,8 @@ class Trainer(DefaultTrainer):
         params: List[Dict[str, Any]] = []
         memo: Set[torch.nn.parameter.Parameter] = set()
         for module_name, module in model.named_modules():
-            for module_param_name, value in module.named_parameters(recurse=False):
+            for module_param_name, value in module.named_parameters(
+                    recurse=False):
                 if not value.requires_grad:
                     continue
                 # Avoid duplicating parameters
@@ -219,13 +216,13 @@ class Trainer(DefaultTrainer):
                     if key in "{}.{}".format(module_name, module_param_name):
                         hyperparams["lr"] = hyperparams["lr"] * lr_mul
                         if comm.is_main_process():
-                            logger.info("Modify Learning rate of {}: {}".format(
-                                "{}.{}".format(module_name, module_param_name), lr_mul))
+                            logger.info(
+                                "Modify Learning rate of {}: {}".format(
+                                    "{}.{}".format(module_name,
+                                                   module_param_name), lr_mul))
 
-                if (
-                        "relative_position_bias_table" in module_param_name
-                        or "absolute_pos_embed" in module_param_name
-                ):
+                if ("relative_position_bias_table" in module_param_name
+                        or "absolute_pos_embed" in module_param_name):
                     hyperparams["weight_decay"] = 0.0
                 if isinstance(module, norm_module_types):
                     hyperparams["weight_decay"] = weight_decay_norm
@@ -238,15 +235,15 @@ class Trainer(DefaultTrainer):
         def maybe_add_full_model_gradient_clipping(optim):
             # detectron2 doesn't have full model gradient clipping now
             clip_norm_val = cfg_solver['CLIP_GRADIENTS']['CLIP_VALUE']
-            enable = (
-                    cfg_solver['CLIP_GRADIENTS']['ENABLED']
-                    and cfg_solver['CLIP_GRADIENTS']['CLIP_TYPE'] == "full_model"
-                    and clip_norm_val > 0.0
-            )
+            enable = (cfg_solver['CLIP_GRADIENTS']['ENABLED'] and
+                      cfg_solver['CLIP_GRADIENTS']['CLIP_TYPE'] == "full_model"
+                      and clip_norm_val > 0.0)
 
             class FullModelGradientClippingOptimizer(optim):
+
                 def step(self, closure=None):
-                    all_params = itertools.chain(*[x["params"] for x in self.param_groups])
+                    all_params = itertools.chain(
+                        *[x["params"] for x in self.param_groups])
                     torch.nn.utils.clip_grad_norm_(all_params, clip_norm_val)
                     super().step(closure=closure)
 
@@ -254,13 +251,13 @@ class Trainer(DefaultTrainer):
 
         optimizer_type = cfg_solver['OPTIMIZER']
         if optimizer_type == "SGD":
-            optimizer = maybe_add_full_model_gradient_clipping(torch.optim.SGD)(
-                params, cfg_solver['BASE_LR'], momentum=cfg_solver['MOMENTUM']
-            )
+            optimizer = maybe_add_full_model_gradient_clipping(
+                torch.optim.SGD)(params,
+                                 cfg_solver['BASE_LR'],
+                                 momentum=cfg_solver['MOMENTUM'])
         elif optimizer_type == "ADAMW":
-            optimizer = maybe_add_full_model_gradient_clipping(torch.optim.AdamW)(
-                params, cfg_solver['BASE_LR']
-            )
+            optimizer = maybe_add_full_model_gradient_clipping(
+                torch.optim.AdamW)(params, cfg_solver['BASE_LR'])
         else:
             raise NotImplementedError(f"no optimizer type {optimizer_type}")
         return optimizer
@@ -278,28 +275,31 @@ class Trainer(DefaultTrainer):
         # frozen = cfg.is_frozen()
         # cfg.defrost()
 
-        assert (
-                cfg.SOLVER.IMS_PER_BATCH % old_world_size == 0
-        ), "Invalid REFERENCE_WORLD_SIZE in config!"
+        assert (cfg.SOLVER.IMS_PER_BATCH %
+                old_world_size == 0), "Invalid REFERENCE_WORLD_SIZE in config!"
         scale = num_workers / old_world_size
-        bs = cfg.SOLVER.IMS_PER_BATCH = int(round(cfg.SOLVER.IMS_PER_BATCH * scale))
+        bs = cfg.SOLVER.IMS_PER_BATCH = int(
+            round(cfg.SOLVER.IMS_PER_BATCH * scale))
         lr = cfg.SOLVER.BASE_LR = cfg.SOLVER.BASE_LR * scale
-        max_iter = cfg.SOLVER.MAX_ITER = int(round(cfg.SOLVER.MAX_ITER / scale))
-        warmup_iter = cfg.SOLVER.WARMUP_ITERS = int(round(cfg.SOLVER.WARMUP_ITERS / scale))
-        cfg.SOLVER.STEPS = tuple(int(round(s / scale)) for s in cfg.SOLVER.STEPS)
+        max_iter = cfg.SOLVER.MAX_ITER = int(round(cfg.SOLVER.MAX_ITER /
+                                                   scale))
+        warmup_iter = cfg.SOLVER.WARMUP_ITERS = int(
+            round(cfg.SOLVER.WARMUP_ITERS / scale))
+        cfg.SOLVER.STEPS = tuple(
+            int(round(s / scale)) for s in cfg.SOLVER.STEPS)
         cfg.TEST.EVAL_PERIOD = int(round(cfg.TEST.EVAL_PERIOD / scale))
-        cfg.SOLVER.CHECKPOINT_PERIOD = int(round(cfg.SOLVER.CHECKPOINT_PERIOD / scale))
+        cfg.SOLVER.CHECKPOINT_PERIOD = int(
+            round(cfg.SOLVER.CHECKPOINT_PERIOD / scale))
         cfg.SOLVER.REFERENCE_WORLD_SIZE = num_workers  # maintain invariant
         logger = logging.getLogger(__name__)
         logger.info(
             f"Auto-scaling the config to batch_size={bs}, learning_rate={lr}, "
-            f"max_iter={max_iter}, warmup={warmup_iter}."
-        )
+            f"max_iter={max_iter}, warmup={warmup_iter}.")
         return cfg
 
     @classmethod
     def test(cls, cfg, model, evaluators=None):
-        from utils.misc import hook_metadata, hook_switcher, hook_opt
+        from semantic_sam.utils.misc import hook_metadata, hook_switcher, hook_opt
         from detectron2.utils.logger import log_every_n_seconds
         import datetime
         # build dataloade
@@ -341,34 +341,40 @@ class Trainer(DefaultTrainer):
                     start_compute_time = time.perf_counter()
 
                     # forward
-                    with torch.autocast(device_type='cuda', dtype=torch.float16):
+                    with torch.autocast(device_type='cuda',
+                                        dtype=torch.float16):
                         # import ipdb; ipdb.set_trace()
                         outputs = model(batch, inference_task=task)
 
-                    total_compute_time += time.perf_counter() - start_compute_time
+                    total_compute_time += time.perf_counter(
+                    ) - start_compute_time
                     start_eval_time = time.perf_counter()
 
                     evaluator.process(batch, outputs)
                     total_eval_time += time.perf_counter() - start_eval_time
 
-                    iters_after_start = idx + 1 - num_warmup * int(idx >= num_warmup)
+                    iters_after_start = idx + 1 - num_warmup * int(
+                        idx >= num_warmup)
                     data_seconds_per_iter = total_data_time / iters_after_start
                     compute_seconds_per_iter = total_compute_time / iters_after_start
                     eval_seconds_per_iter = total_eval_time / iters_after_start
-                    total_seconds_per_iter = (time.perf_counter() - start_time) / iters_after_start
+                    total_seconds_per_iter = (time.perf_counter() -
+                                              start_time) / iters_after_start
 
-                    if comm.is_main_process() and (idx >= num_warmup * 2 or compute_seconds_per_iter > 5):
-                        eta = datetime.timedelta(seconds=int(total_seconds_per_iter * (total - idx - 1)))
+                    if comm.is_main_process() and (idx >= num_warmup * 2
+                                                   or compute_seconds_per_iter
+                                                   > 5):
+                        eta = datetime.timedelta(
+                            seconds=int(total_seconds_per_iter *
+                                        (total - idx - 1)))
                         log_every_n_seconds(
                             logging.INFO,
-                            (
-                                f"Inference done {idx + 1}/{total}. "
-                                f"Dataloading: {data_seconds_per_iter:.4f} s/iter. "
-                                f"Inference: {compute_seconds_per_iter:.4f} s/iter. "
-                                f"Eval: {eval_seconds_per_iter:.4f} s/iter. "
-                                f"Total: {total_seconds_per_iter:.4f} s/iter. "
-                                f"ETA={eta}"
-                            ),
+                            (f"Inference done {idx + 1}/{total}. "
+                             f"Dataloading: {data_seconds_per_iter:.4f} s/iter. "
+                             f"Inference: {compute_seconds_per_iter:.4f} s/iter. "
+                             f"Eval: {eval_seconds_per_iter:.4f} s/iter. "
+                             f"Total: {total_seconds_per_iter:.4f} s/iter. "
+                             f"ETA={eta}"),
                             n=5,
                         )
                     start_data_time = time.perf_counter()
@@ -376,6 +382,7 @@ class Trainer(DefaultTrainer):
             # evaluate
             results = evaluator.evaluate()
         model = model.train().cuda()
+
 
 def setup(args):
     """
@@ -386,7 +393,9 @@ def setup(args):
     cfg = LazyConfig.apply_overrides(cfg, args.opts)
     # cfg.freeze()
     default_setup(cfg, args)
-    setup_logger(output=cfg.OUTPUT_DIR, distributed_rank=comm.get_rank(), name="maskdino")
+    setup_logger(output=cfg.OUTPUT_DIR,
+                 distributed_rank=comm.get_rank(),
+                 name="maskdino")
     return cfg
 
 
@@ -396,15 +405,14 @@ def main(args=None):
     if args.eval_only:
         model = Trainer.build_model(cfg)
         DetectionCheckpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(
-            cfg.MODEL.WEIGHTS, resume=args.resume
-        )
+            cfg.MODEL.WEIGHTS, resume=args.resume)
         res = Trainer.test(cfg, model)
         if cfg.TEST.AUG.ENABLED:
             res.update(Trainer.test_with_TTA(cfg, model))
         return res
 
     trainer = Trainer(cfg)
-    if len(args.lang_weight)>0:
+    if len(args.lang_weight) > 0:
         # load language weight for semantic
         import copy
         weight = copy.deepcopy(trainer.cfg.MODEL.WEIGHTS)
@@ -414,9 +422,10 @@ def main(args=None):
         trainer.cfg.MODEL.WEIGHTS = weight
     print("load pretrained model weight!!!!!!")
     trainer.resume_or_load(resume=args.resume)
-    
+
     return trainer.train()
-                
+
+
 if __name__ == "__main__":
     # main()
     parser = default_argument_parser()
@@ -435,5 +444,5 @@ if __name__ == "__main__":
         num_machines=args.num_machines,
         machine_rank=args.machine_rank,
         dist_url=args.dist_url,
-        args=(args,),
+        args=(args, ),
     )
