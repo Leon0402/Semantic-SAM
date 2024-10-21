@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "Semantic-SAM"
-version = "1.0.6"
+version = "1.0.7"
 description = "Segment and Recognize Anything at Any Granularity."
 readme = "README.md"
 requires-python = ">=3.8"
@@ -43,7 +43,7 @@ dependencies = [
     "mup==1.0.0",
     "accelerate==0.23.0",
     "kornia==0.7.0",
-    "deepspeed==0.10.3",
+    "deepspeed>=0.10",
     "wandb==0.15.12",
     "infinibatch==0.1.1",
     "gradio>=5.1.0",
