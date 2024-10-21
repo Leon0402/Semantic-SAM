@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "Semantic-SAM"
-version = "1.0.5"
+version = "1.0.6"
 description = "Segment and Recognize Anything at Any Granularity."
 readme = "README.md"
 requires-python = ">=3.8"
@@ -46,7 +46,7 @@ dependencies = [
     "deepspeed==0.10.3",
     "wandb==0.15.12",
     "infinibatch==0.1.1",
-    "gradio>=4.44.0",
+    "gradio>=5.1.0",
     "openai-whisper",
 ]
 
